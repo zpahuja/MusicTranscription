@@ -1,0 +1,229 @@
+Goal:
+
+Build an automatic music transcription system as cs598ps project. In best case, project should be so good that it results in a paper. If not, it should atleast be able to impress paris enough that he agrees to advise me for an independent study.
+
+---------------------------------------------------
+
+Timeframe:
+
+Till December 20 for project. Till January for paper submission and independent study.
+
+---------------------------------------------------
+
+Process:
+
+1. Do an initial survey. Aim of this survey is to build an arsenal of techniques to start with. Guidelines to do this:
+-> Collect relevant concepts from slides
+-> read 3-4 highly cited papers
+
+2. Build a baseline. Based on the techniques in previous point, build as best system as you can. Steps involved here are:
+-> download datasets
+-> write skeleton code with I/O pipeline, class structure
+-> implement/incorporate topics in point 1 one-by-one
+
+3. Analyse the behavior of techniques using below guidelines:
+-> explain the results
+-> identify advantages for each approach
+-> identify short-comings for each approach
+
+4. Iterative improvement. Try to improve upon the short-comings of different approaches keeping their advantages intact. Use this template:
+-> try to come up with potential solutions that improve upon the short-comings either by brainstorm or reading additional papers/book.
+-> analyse the new approach based on point 3
+-> repeat step 4 till it is good enough
+
+---------------------------------------------------
+
+Checkpoints:
+
+1. Initial survey. November 17 (done)
+2. Build a baseline. November 20 (overdue) (New deadline 25)
+3. Analysis. November 21 (cascade) (New deadline 27)
+4. Checkpoint1. November 30 (improvement1)
+5. Checkpoint2. December 10 (improvement2)
+
+---------------------------------------------------
+
+Techniques:
+
+1. Experiment with different filterbanks (stft, mel, log, etc.) as given in the paper.
+2. Incorporate musically useful range or any other technique useful in lecture 4
+3. Experiment with log spectrogram instead of just linear (slide 37 lecture 4)
+4. Incorporate PCA, ICA, kPCA, MDS, ISOMAP, LLE, Laplacian Eigenmaps
+5. experiment with simple matched filter (slide 16 lecture 8)
+6. Normalized matched filter
+7. Auto corelation (pitch tracking)
+8. Convolve on DFT like features
+9. Classifiers: Gaussian, Naive Bayes, linear, neural network, svm, lda, knn, parzen, boosting.
+10. Clustering: k-means, k-medoids, kernel k-means, GMM
+11. DTW different notes and see which one of them fit the segment best
+12. Learn HMM for each note and try to see which HMM fits best for each note.
+13. PLSA, PARAFAC
+14. Convnet based approach in paper.
+---------------------------------------------------
+
+[Approaches]
+
+Lecture-4
+=====================================
+1. Experiment with different filterbanks (stft, mel, log, etc.) as given in the paper.
+2. Incorporate musically useful range or any other technique useful in lecture 4
+3. Experiment with log spectrogram instead of just linear (slide 37 lecture 4)
+
+Approach-1
+1. Filterbanks to experiment with: 3.1 of invariances and data augmentation paper.
+2. Experiment with range of frequency.
+3. Experiment with log spaced vs linear spaced axes
+4. Apply log to values of filter banks and see what happens
+5. Finally, apply different classification methods to test which filterbank is good for it.
+
+Pros:
+1. fits well with the theme of a course project.
+2. feasible to do without gpu
+
+Cons:
+1. Already been done in above paper.
+2. Very basic idea. 
+=====================================
+
+Lecture-5,6,7,9,10,11
+=====================================
+4. Incorporate PCA, ICA, kPCA, MDS, ISOMAP, LLE, Laplacian Eigenmaps
+
+Approach-2
+1. Apply dimentionality reduction on filterbank representation
+2. Finally, apply different classification methods to test which dimensionality reduction method is good for it.
+
+Pros:
+1. fits well with the theme of a course project.
+2. feasible to do without gpu
+
+Cons:
+1. There is some room for sophistication. Not taking advantage of time series structure.
+2. Difficult to interpret the results of experiment.
+=====================================
+
+Lecture-8
+=====================================
+5. experiment with simple matched filter (slide 16 lecture 8)
+6. Normalized matched filter
+7. Auto corelation (pitch tracking)
+8. Convolve on DFT like features
+
+Approach-3
+1.1. Create a template which we want to detect (a note). Averaging training notes is one way to do. Experiment with others.
+1.2. Instead of making a template, take samples from the file itself to improve generalization. These templates can be found automatically or by human annotations.
+1.3. Yet another approach is to try and use auto correlation somehow? (not clear) 
+2. Do a template matching for all notes separately.
+3. Experiment with feature representations and/or dimentionality reduction methods.
+4. Obtain the threshold for similarity by optimizing F1 score.
+
+Pros:
+1. Good level of sophistication. And well organised approach.
+2. Easy to explain the results.
+3. Has flexibility of using different techniques for different notes/instruments.
+4. Can generalize better in case of taking templates from the target audio itself.
+
+Cons:
+1. Too much tweaking and engineering involved. It will be error prone and time consuming.
+2. Not sure which filterbank representation or dimensionality reduction to use.
+3. No probabilistic interpretation. So things like incorporating priors or language model is difficult.
+=====================================
+
+Lecture-12
+=====================================
+10. Clustering: k-means, k-medoids, kernel k-means, GMM
+
+Approach-4
+1. Cluster segments using GMM.
+2. compute p(cluster|note) by counting how many times a note segment appear in cluster
+3. compute p(note). This can be done by simple counting or language model like approach
+4. predict results based on posterior (prior times likelihood)
+
+Pros:
+1. has probabilistic interpretation thus can incorporate language modelling
+2. Easy to explain the results
+
+Cons:
+1. Doesn't sound very natural
+2. Not sure which filterbank representation or dimensionality reduction to use.
+=====================================
+
+Lecture-13
+=====================================
+11. DTW different notes and see which one of them fit the segment best
+
+Approach-5
+1. Use any decent approach to predict notes.
+2. Take a segment of notes (3,4 notes together), and try DTW of those with the predicted segment.
+3. Try and do this for notes having lower but significant scores to boost accuracy
+
+Pros:
+1. Can be used on top of any approach basically.
+2. Doesn't need lots of training data and complicated models to train and run
+
+Cons:
+1. No probabilistic interpretation
+2. Will involve lots of tweaking to make it work.
+=====================================
+
+Lecture-13
+=====================================
+12. Learn HMM for each note and try to see which HMM fits best for each note.
+
+Approach-6
+1. learn different HMMs for each note.
+2. Now match different segments with the HMM alternatives and predict notes.
+
+Pros:
+1. A more sophisticated way to model music notes that can capture variability in time.
+
+Cons:
+1. How to compute boundaries for each note?
+=====================================
+
+Lecture-17
+=====================================
+13. PLSA, PARAFAC
+
+Approach-7
+1. Apply PLCA instead of NMF
+
+Pros:
+
+Cons:
+1. Already been done.
+2. Performs poorly if dictionaries don't match.
+=====================================
+
+Lecture-19
+=====================================
+14. Apply deep learning
+
+Approach-8
+1. Use a convnet/RNN/LSTM/attention to directly predict labels
+
+Pros:
+1. Discriminative instead of generative
+2. Highly expressive
+
+Cons:
+1. Requires GPUs
+2. Difficult to train 
+3. Difficult to get the design right
+=====================================
+
+Best approach IMO:
+1. Break the problem into detection and post-processing
+2. Experiment with DTW and language model based post processing (enumerate approaches and fill in details)
+3. Pick the most promising approach out of matched detection, HMM, clustering, dimensionality reduction and deep learning
+ (picked ones: deep learning, dimensionality reduction, matched detection) (enumerate approaches)
+4. Include filterbank analysis for sure. (fill in details and code it)
+
+Meeting agenda:
+1. Fix a high level plan/approach to follow
+2. Meet TAs on moday and Paris on Tuesday to discuss the plan with them
+3. Discuss the dataset with team-mates.
+---------------------------------------------------
+
+Useful links:
+http://c4dm.eecs.qmul.ac.uk/ismir15-amt-tutorial/AMT_tutorial_ISMIR_2015.pdf
