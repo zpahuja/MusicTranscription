@@ -41,7 +41,7 @@ import random
 
 # constants
 fs = 44100
-frame_size = int(0.2*fs) #0.2 seconds
+frame_size = int(0.05*fs) #0.2 seconds
 stride = frame_size//4 
 datadir="../data/musicnet/" #default datadirectory
 demolist=['1727','1730','2303','2677','2678'] #used as toy list for testing the code
@@ -187,10 +187,10 @@ def getLabel(tree,i):
 		lab[intvl[2][1]-1]=1
 	return lab
 
-#final step in the pipeline. Sampling data using following three modes:
-#0. Get all of the data
-#1. on rolling basis with a window size
-def sampleData(datalist,start=0,numfiles=-1,nperchunk=1,nchunks=1000):
+#final step in the pipeline. Sampling data can be done on a rolling bases
+#start=index of starting file in the datalist
+#numfiles= number files to retriev
+def sampleData(datalist,start=0,numfiles=-1):
 	flist=[i for i in range(len(datalist))]+[i for i in range(len(datalist))]
 	if numfiles==-1:
 		numfiles=len(datalist)
@@ -199,12 +199,11 @@ def sampleData(datalist,start=0,numfiles=-1,nperchunk=1,nchunks=1000):
 	for i in flist:
 		xl,yl=[],[]
 		f,_,(ftree,L)=datalist[i]
-		print (f)
+		#print (f)
 		fs1, wavdata = wavfile.read(join(datadir,"data/"+f+".wav"))
 		if fs1!=fs:
 			print ("sample rate doesn't match")
 		for rg in L:
-			print (rg)
 			for t in range(rg[0]+frame_size//2,rg[1]-frame_size//2,stride):
 				xl.append(wavdata[t-frame_size//2:t+frame_size//2])
 				yl.append(getLabel(ftree,t))
