@@ -38,10 +38,11 @@ from os.path import isfile, join
 from scipy.io import wavfile
 import csv
 import random
+import pickle
 
 # constants
 fs = 44100
-frame_size = int(0.05*fs) #0.2 seconds
+frame_size = 16384 #taken from cnn_amt.pdf paper
 stride = frame_size//4 
 datadir="../data/musicnet/" #default datadirectory
 demolist=['1727','1730','2303','2677','2678'] #used as toy list for testing the code
@@ -58,61 +59,79 @@ def readData(datapath=0):
 	if datapath!=0:
 		global datadir
 		datadir=datapath
-	fileids=getFileids()
 
-	fileids=demolist #just for testing
+	if isfile(join(datadir,'binaries/datalist.pkl')):
+		with open(join(datadir,'binaries/datalist.pkl'),'rb') as f:
+			datalist=pickle.load(f)
+	else:
+		fileids=getFileids()
 
-	datalist=[]
-	for f in fileids:
-		with open(join(datadir,"labels/"+f+".csv")) as labf:
-			reader=csv.reader(labf,delimiter=',',)
-			labels=[row[:4] for row in reader][1:] #ignoring columns other than first 4 and header
-		cts={}
-		for i in range(1,129):
-			cts[i]=IntervalTree()
-			cts[-i]=IntervalTree()
-		for start,end,instrument,note in labels:
-			cts[-int(instrument)].addi(int(start),int(end),(int(instrument),int(note)))
-			cts[int(note)].addi(int(start),int(end),(int(instrument),int(note)))
-		datalist.append((f,cts))
+		fileids=demolist #just for testing
+
+		datalist=[]
+		for f in fileids:
+			print ("reading {}".format(f))
+			with open(join(datadir,"labels/"+f+".csv")) as labf:
+				reader=csv.reader(labf,delimiter=',',)
+				labels=[row[:4] for row in reader][1:] #ignoring columns other than first 4 and header
+			cts={}
+			for i in range(1,129):
+				cts[i]=IntervalTree()
+				cts[-i]=IntervalTree()
+			for start,end,instrument,note in labels:
+				cts[-int(instrument)].addi(int(start),int(end),(int(instrument),int(note)))
+				cts[int(note)].addi(int(start),int(end),(int(instrument),int(note)))
+			datalist.append((f,cts))
+
+		with open(join(datadir,'binaries/datalist.pkl'),'wb') as f:
+			pickle.dump(datalist,f)
 	return datalist
 
 #second step of the pipeline
 #keepnotes and keepinstrs are list of notes and instruments to keep
 #similarly exclude notes and instrs are ones to avoid even if it means ignoring keep ones
 def filterData(datalist, keepnotes=0, excludenotes=0, keepinstr=0, excludeinstr=0):
-	if keepnotes==0:
-		keepnotes=[x for x in range(1,129)]
-	if keepinstr==0:
-		keepinstr=[x for x in range(1,129)]
+	paramstr=str(keepnotes)+str(excludenotes)+str(keepinstr)+str(excludeinstr)
+	if isfile(join(datadir,'binaries/'+paramstr+".pkl")):
+		with open(join(datadir,'binaries/'+paramstr+".pkl"),'rb') as f:
+			newdatalist=pickle.load(f)
+	else:
+		if keepnotes==0:
+			keepnotes=[x for x in range(1,129)]
+		if keepinstr==0:
+			keepinstr=[x for x in range(1,129)]
 
-	if excludenotes==0:
-		excludenotes=[]
-	if excludenotes==-1:
-		excludenotes=[x for x in range(1,129) if x not in keepnotes]
+		if excludenotes==0:
+			excludenotes=[]
+		if excludenotes==-1:
+			excludenotes=[x for x in range(1,129) if x not in keepnotes]
 
-	if excludeinstr==0:
-		excludeinstr=[]
-	if excludeinstr==-1:
-		excludeinstr=[x for x in range(1,129) if x not in keepinstr]
+		if excludeinstr==0:
+			excludeinstr=[]
+		if excludeinstr==-1:
+			excludeinstr=[x for x in range(1,129) if x not in keepinstr]
 
-	newdatalist=[]
-	for f,cts in datalist:
-		#starting with empty tree
-		ftree=IntervalTree() 
+		newdatalist=[]
+		for f,cts in datalist:
+			print ("processing file {}".format(f))
+			#starting with empty tree
+			ftree=IntervalTree() 
 
-		#taking OR with all keepinstr and notes
-		for instr in keepinstr:
-			ftree|=cts[-instr] 
-		for note in keepnotes:
-			ftree|=cts[note]
+			#taking OR with all keepinstr and notes
+			for instr in keepinstr:
+				ftree|=cts[-instr] 
+			for note in keepnotes:
+				ftree|=cts[note]
 
-		#taking set difference with exclude instr and notes
-		for instr in excludeinstr:
-			ftree-=cts[-instr] 
-		for note in excludenotes:
-			ftree-=cts[note]
-		newdatalist.append((f,ftree))
+			#taking set difference with exclude instr and notes
+			for instr in excludeinstr:
+				ftree-=cts[-instr] 
+			for note in excludenotes:
+				ftree-=cts[note]
+			newdatalist.append((f,ftree))
+
+		with open(join(datadir,'binaries/'+paramstr+".pkl"),'wb') as f:
+			pickle.dump(newdatalist,f)
 	return newdatalist
 
 #third step in the pipeline
@@ -176,7 +195,9 @@ def splitData(datalist):
 	L=[train,val,test]
 	for i in range(3):
 		for f in L[i]:
-			newdatalist[i].append((f,fduration[f],datadict[f]))
+			ftree,Lunion = datadict[f]
+			for start,end in Lunion:
+				newdatalist[i].append((f,start,end,ftree))
 	return newdatalist
 
 
@@ -190,29 +211,35 @@ def getLabel(tree,i):
 #final step in the pipeline. Sampling data can be done on a rolling bases
 #start=index of starting file in the datalist
 #numfiles= number files to retriev
-def sampleData(datalist,start=0,numfiles=-1):
+def sampleData(datalist,firstf=0,numfiles=-1):
 	flist=[i for i in range(len(datalist))]+[i for i in range(len(datalist))]
-	if numfiles==-1:
-		numfiles=len(datalist)
-	flist=flist[start:start+numfiles]
+	
+	currf,numsegs=firstf,0
 	X,y=[],[]
-	for i in flist:
-		xl,yl=[],[]
-		f,_,(ftree,L)=datalist[i]
+	wavdata={}
+	while numsegs!=numfiles:
+		if ((numfiles==-1) and currf==len(datalist)):
+			break
+		f,start,end,ftree=datalist[flist[currf]]
 		#print (f)
-		fs1, wavdata = wavfile.read(join(datadir,"data/"+f+".wav"))
-		if fs1!=fs:
-			print ("sample rate doesn't match")
-		for rg in L:
-			for t in range(rg[0]+frame_size//2,rg[1]-frame_size//2,stride):
-				xl.append(wavdata[t-frame_size//2:t+frame_size//2])
-				yl.append(getLabel(ftree,t))
-		xl=np.array(xl)
-		yl=np.array(yl)
-		X.append(np.transpose(xl))
-		y.append(np.transpose(yl))
+		if f not in wavdata:
+			fs1, wavdata[f] = wavfile.read(join(datadir,"data/"+f+".wav"))
+			if fs1!=fs:
+				print ("sample rate doesn't match")
+		dt=wavdata[f]
+		xl,yl=[],[]
+		for t in range(start+frame_size//2,end-frame_size//2,stride):
+			xl.append(dt[t-frame_size//2:t+frame_size//2])
+			yl.append(getLabel(ftree,t))
+		if len(xl)>0:
+			numsegs+=1
+			xl=np.array(xl)
+			yl=np.array(yl)
+			X.append(np.transpose(xl))
+			y.append(np.transpose(yl))
+		currf+=1
 			
-	return {'X':X, 'y':y}, flist[-1]
+	return {'X':X, 'y':y}, flist[currf]
 
 
 #the main function is a demo of musicnetIO interface

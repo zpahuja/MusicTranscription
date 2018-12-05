@@ -14,6 +14,7 @@ from sklearn import linear_model
 from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
 
+notelist=[i for i in range(128)]
 notelist=[67,68,69]
 
 # assumes X is d x n matrix where d is dimensions and n is numsamples
@@ -24,32 +25,33 @@ def normalize(X,ord=None):
 
 
 def plotspec(spec):
-	librosa.display.specshow(librosa.amplitude_to_db(spec,ref=np.max),y_axis='log', x_axis='time')
+	librosa.display.specshow(librosa.amplitude_to_db(spec,ref=np.max),sr=44100,y_axis='log', x_axis='time')
 	plt.title('Power spectrogram')
 	plt.colorbar(format='%+2.0f dB')
 	plt.tight_layout()
 	plt.show()
 
-def filterbank(X,fb):
+def filterbank(X,fb,window_size=4096,hop_length=512):
 	if fb=='stft':
 		l=[]
 		for i in range(X.shape[1]):
-			l.append(np.abs(librosa.stft(X[:,i])).flatten())
+			xfb=np.abs(librosa.stft(X[:,i],n_fft=window_size,
+					hop_length=hop_length))
+			l.append(xfb.flatten())
 		Xfb=np.stack(l,axis=1)
 		return Xfb
 
 class classifier:
 	def __init__(self,n):
-		self.clf = [linear_model.SGDClassifier(max_iter=10, tol=1e-3) for _ in range(n)]
+		self.clf = [linear_model.SGDClassifier() for _ in range(n)]
 		self.n=n
 
 	def partial_fit(self,X,y):
 		for i in range(self.n):
-			print (i)
 			self.clf[i].partial_fit(X,y[:,i],classes=np.array([0,1]))
 
 	def predict(self,X):
-		yhat=[self.clf[i].predict(X) for i in range(self.n)]
+		yhat=[self.clf[i].decision_function(X) for i in range(self.n)]
 		yhat=np.stack(yhat,axis=1)
 		return yhat
 
@@ -60,16 +62,22 @@ class fbmodel:
 		self.fb='stft'
 		self.clf=classifier(n=len(notelist))
 
-	def train(self,traindl, epochs=1, batchsize=2):
+	def train(self,traindl, epochs=1, batchsize=20):
 		start=0
-		for _ in range(epochs):
-			td, start=mn.sampleData(traindl,start=start,numfiles=batchsize)
-			X=np.concatenate(td['X'],axis=1)
-			y=np.concatenate(td['y'],axis=1)[notelist] #keep only note labels
-			Xnorm=normalize(X)
-			H=filterbank(Xnorm,self.fb)
-			logH=np.log(H)
-			self.clf.partial_fit(np.transpose(X), np.transpose(y))
+		self.mean,self.numsamples=0,0
+		for ep in range(epochs):
+			for it in range(len(traindl)//batchsize):
+				td, start=mn.sampleData(traindl,firstf=start,numfiles=batchsize)
+				X=np.concatenate(td['X'],axis=1)
+				y=np.concatenate(td['y'],axis=1)[notelist] #keep only note labels
+				Xnorm=normalize(X)
+				H=filterbank(Xnorm,self.fb)
+				logH=np.log(H)
+				self.mean = self.mean*self.numsamples+np.mean(logH,axis=1,keepdims=True)*logH.shape[1]
+				self.numsamples += logH.shape[1]
+				self.mean/=self.numsamples
+				self.clf.partial_fit(np.transpose(logH-np.tile(self.mean,(1,logH.shape[1]))), np.transpose(y))
+				print ("completed iteration {}/{}, epoch {}/{}, numsamples {}".format(it,len(traindl)//batchsize,ep,epochs,logH.shape[1]))
 
 	def predict(self,testdl):
 		td, _ = mn.sampleData(testdl)
@@ -78,7 +86,7 @@ class fbmodel:
 		Xnorm=normalize(X)
 		H=filterbank(Xnorm,self.fb)
 		logH=np.log(H)
-		yhat=self.clf.predict(np.transpose(X))
+		yhat=self.clf.predict(np.transpose(logH-np.tile(self.mean,(1,logH.shape[1]))))
 		return np.transpose(yhat), y
 
 def computescore(yhat,y,func='f1'):
@@ -95,8 +103,16 @@ def main():
 	traindl,valdl,testdl = mn.splitData(newdatalist)
 
 	td, _ = mn.sampleData(valdl)
+
 	y=np.concatenate(td['y'],axis=1)[notelist] #keep only note labels
 	print (np.ndarray.tolist(np.sum(y,axis=1)))
+
+	#visualizing spectrogram
+	# X=np.concatenate(td['X'][0:1],axis=1)[:,0:2]
+	# print (X.shape)
+	# Xnorm=normalize(X)
+	# H=filterbank(Xnorm,'stft')
+	# print (H.shape)
 
 	stftmod = fbmodel(fb='stft')
 
@@ -114,6 +130,8 @@ def main():
 
 	yhat,y=np.transpose(yhat),np.transpose(y)
 	precision, recall, _ = precision_recall_curve(y.flatten(), yhat.flatten())
+	print (precision)
+	print (recall)
 	fig = plt.figure()
 	plt.plot(recall,precision,color=(41/255.,104/255.,168/255.),linewidth=3)
 	fig.axes[0].set_xlabel('recall')
