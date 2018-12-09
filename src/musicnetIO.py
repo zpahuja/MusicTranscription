@@ -45,7 +45,11 @@ fs = 44100
 frame_size = 16384 #taken from cnn_amt.pdf paper
 stride = frame_size//4 
 datadir="../data/musicnet/" #default datadirectory
-demolist=['1727','1730','2303','2677','2678'] #used as toy list for testing the code
+# demolist=['1727','1730','2303','2677','2678'] #used as toy list for testing the code
+# splitlist=['train','train','test','train','train']
+demo=False
+demolist=['1727','2588','2590'] #used as toy list for testing the code
+splitlist=['test','train','train']
 
 #returns list of fileids
 def getFileids():
@@ -66,7 +70,8 @@ def readData(datapath=0):
 	else:
 		fileids=getFileids()
 
-		fileids=demolist #just for testing
+		if demo:
+			fileids=demolist #just for testing
 
 		datalist=[]
 		for f in fileids:
@@ -86,6 +91,26 @@ def readData(datapath=0):
 		with open(join(datadir,'binaries/datalist.pkl'),'wb') as f:
 			pickle.dump(datalist,f)
 	return datalist
+
+def getSpan(ftree):
+	L=[]
+	for intvl in ftree:
+		L.append((intvl[0],1))
+		L.append((intvl[1],-1))
+	L.sort(key=lambda x: x[0]-0.01*x[1])
+	Lunion=[]
+	duration=0
+	start, end, ct=-1,-1,0
+	for pt in L:
+		if ct==0:
+			start=pt[0]
+		ct+=pt[1]
+		if ct==0:
+			end=pt[0]
+			Lunion.append((start,end))
+			duration+=(end-start)
+			start,end=-1,-1	
+	return Lunion, duration
 
 #second step of the pipeline
 #keepnotes and keepinstrs are list of notes and instruments to keep
@@ -113,22 +138,33 @@ def filterData(datalist, keepnotes=0, excludenotes=0, keepinstr=0, excludeinstr=
 
 		newdatalist=[]
 		for f,cts in datalist:
-			print ("processing file {}".format(f))
-			#starting with empty tree
-			ftree=IntervalTree() 
+			try:
+				print ("processing file {}".format(f))
+				#starting with empty tree
+				ftree=IntervalTree() 
 
-			#taking OR with all keepinstr and notes
-			for instr in keepinstr:
-				ftree|=cts[-instr] 
-			for note in keepnotes:
-				ftree|=cts[note]
+				#taking OR with all keepinstr and notes
+				for instr in keepinstr:
+					ftree|=cts[-instr] 
+				for note in keepnotes:
+					ftree|=cts[note]
 
-			#taking set difference with exclude instr and notes
-			for instr in excludeinstr:
-				ftree-=cts[-instr] 
-			for note in excludenotes:
-				ftree-=cts[note]
-			newdatalist.append((f,ftree))
+				#taking set difference with exclude instr and notes
+				excltree=IntervalTree()
+				for instr in excludeinstr:
+					excltree|=cts[-instr] 
+				for note in excludenotes:
+					excltree|=cts[note]
+				Lunion,_ = getSpan(excltree)
+				for lo,hi in Lunion:
+					print ("{} {}".format(lo,hi))
+					ftree.remove_overlap(lo,hi)
+				newdatalist.append((f,ftree))
+			except:
+				print ("{} is painful".format(f))
+				with open(join(datadir,"painFiles.csv"),'a') as fw:
+					writer = csv.writer(fw, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+					writer.writerow([f])
 
 		with open(join(datadir,'binaries/'+paramstr+".pkl"),'wb') as f:
 			pickle.dump(newdatalist,f)
@@ -138,26 +174,12 @@ def filterData(datalist, keepnotes=0, excludenotes=0, keepinstr=0, excludeinstr=
 def splitData(datalist):
 	#computing duration for each file as it will decide which files go to which split
 	datadict,fduration={},{}
+	usableFlist=[]
 	for f,ftree in datalist:
-		L=[]
-		for intvl in ftree:
-			L.append((intvl[0],1))
-			L.append((intvl[1],-1))
-		L.sort(key=lambda x: x[0]-0.01*x[1])
-		Lunion=[]
-		duration=0
-		start, end, ct=-1,-1,0
-		for pt in L:
-			if ct==0:
-				start=pt[0]
-			ct+=pt[1]
-			if ct==0:
-				end=pt[0]
-				Lunion.append((start,end))
-				duration+=(end-start)
-				start,end=-1,-1
+		Lunion,duration = getSpan(ftree)
 		datadict[f]=(ftree,Lunion)
 		fduration[f]=duration
+		usableFlist.append(f)
 
 	#getting the list of test and train files
 	train,test,val=[],[],[]
@@ -166,15 +188,17 @@ def splitData(datalist):
 		reader=csv.reader(f,delimiter=',')
 		fileids=[row[0:2] for row in reader][1:] #skipping header
 
-		fileids=zip(demolist,['train','train','test','train','train'])
+		if demo:
+			fileids=zip(demolist,splitlist)
 
 		for f,sp in fileids:
-			if sp=='train':
-				train.append(f)
-				trd+=fduration[f]
-			else:
-				test.append(f)
-				ted+=fduration[f]
+			if f in usableFlist:
+				if sp=='train':
+					train.append(f)
+					trd+=fduration[f]
+				else:
+					test.append(f)
+					ted+=fduration[f]
 
 	print ("duration of all test files: {} seconds".format(ted/fs))
 	print ("test files: {} ".format(test))
@@ -197,7 +221,7 @@ def splitData(datalist):
 		for f in L[i]:
 			ftree,Lunion = datadict[f]
 			for start,end in Lunion:
-				newdatalist[i].append((f,start,end,ftree))
+				newdatalist[i].append((f,start,end,IntervalTree(ftree[start:end])))
 	return newdatalist
 
 
@@ -209,8 +233,8 @@ def getLabel(tree,i):
 	return lab
 
 #final step in the pipeline. Sampling data can be done on a rolling bases
-#start=index of starting file in the datalist
-#numfiles= number files to retriev
+#start=index of starting file segment in the datalist
+#numfiles= number file segments to retriev
 def sampleData(datalist,firstf=0,numfiles=-1):
 	flist=[i for i in range(len(datalist))]+[i for i in range(len(datalist))]
 	
@@ -245,6 +269,13 @@ def sampleData(datalist,firstf=0,numfiles=-1):
 #the main function is a demo of musicnetIO interface
 def main():
 	datalist=readData()
+	for f,cts in datalist:
+		print (f)
+		for x in cts:
+			L=[y for y in cts[x]]
+			print ("{}: {}".format(x,L))
+		print ("-----------")
+	print ("==================")
 	# print (datalist[0][0])
 	# print ("-----------------------")
 	# print (datalist[0][1][-43])
@@ -253,12 +284,19 @@ def main():
 	# print ("-----------------------")
 
 	newdatalist=filterData(datalist,keepinstr=[1],keepnotes=0,excludenotes=0,excludeinstr=-1)
+	for f, ftree in newdatalist:
+		print ("{}: {}".format(f,ftree))
+	print ("========================")
+
 	# print (newdatalist[0][1])
 	# print ("-----------------------")
 
 	traindl,valdl,testdl=splitData(newdatalist)
+	for f,start,end,ftree in testdl:
+		print ("{}: ({},{}): {}".format(f,start,end,ftree))
+	print ("============================")
 
-	trainData,_=sampleData(traindl,start=1,numfiles=1)
+	trainData,_=sampleData(traindl,firstf=1,numfiles=1)
 
 
 if __name__ == '__main__':

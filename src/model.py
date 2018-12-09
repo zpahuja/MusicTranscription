@@ -7,15 +7,18 @@
 
 import musicnetIO as mn
 import numpy as np
+import pandas as pd
 import librosa
 import librosa.display
 import matplotlib.pyplot as plt
 from sklearn import linear_model
 from sklearn.metrics import precision_recall_curve
 from sklearn.metrics import average_precision_score
+from collections import defaultdict
+import csv
 
-notelist=[i for i in range(128)]
-notelist=[67,68,69]
+notelist=[i for i in range(40,60)]
+#notelist=[67,68,69]
 
 # assumes X is d x n matrix where d is dimensions and n is numsamples
 # return Xnorm where Xnorm[:,i]=X[:,i]/norm(X[:,i])
@@ -93,6 +96,67 @@ def computescore(yhat,y,func='f1'):
 
 	return average_precision_score(y.flatten(), yhat.flatten())
 
+def newdiv(a,b):
+	return a/b if b else 0
+
+def results1():
+	df = pd.read_csv("experiment1.csv",names=['w','s','note','span','beg'])
+	W=[1024,2048,4096,8192,16384]
+	S=[128,256,512,1024]
+	for w in W:
+		for s in [128]:
+			for note in range(128):
+				df1=df.loc[(df['w']==w) & (df['s']==s) & (df['note']==note)]
+				if len(df1)>0:
+					print (df1['span'].mean())
+					print (df1['beg'].mean())
+					if df1['span'].mean()<4:
+						print("low span for note {}. (w,s)=({},{})".format(note,w,s))
+					if df1['beg'].mean()<3:
+						print("low beg for note {}. (w,s)=({},{})".format(note,w,s))
+					print ("---")
+			print("=================================")
+
+def experiment1():
+	W=[1024,2048,4096,8192,16384]
+	S=[128,256,512,1024]
+	datalist = mn.readData()
+	newdatalist = mn.filterData(datalist,keepinstr=[1],keepnotes=0,excludenotes=0,excludeinstr=-1)
+	traindl,valdl,testdl = mn.splitData(newdatalist)
+
+	with open("experiment1.csv",'w') as f:
+		f.write("") #clear the file
+
+	for w in W:
+		for s in S:
+			span=[[] for _ in range(128)]
+			numbegins=[[] for _ in range(128)]
+			for it in range(len(traindl)):
+
+				f,start,end,ftree=traindl[it]
+				startcts=defaultdict(int)
+				spancts=defaultdict(int)
+				for i in range(start,end-w,s):
+					s1=ftree[i]
+					s3=ftree[i+w//2]
+					for intvl in s3.difference(s1):
+						startcts[intvl]+=1
+					for intvl in s1:
+						if intvl[0]==i:
+							startcts[intvl]+=1
+					for intvl in s3:
+						spancts[intvl]+=1
+				for intvl in ftree:
+					numbegins[intvl[2][1]].append(startcts[intvl])
+					span[intvl[2][1]].append(spancts[intvl])
+				
+			with open("experiment1.csv",'a') as f:
+				writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+				for i in range(128):
+					for j in range(len(span[i])):
+						writer.writerow([w,s,i,span[i][j],numbegins[i][j]])
+		print ("completed {} out of {}".format(w,W))
+
 #the main function is a demo of fbmodel training and testing
 def main():
 
@@ -101,18 +165,6 @@ def main():
 	newdatalist = mn.filterData(datalist,keepinstr=[1],keepnotes=0,excludenotes=0,excludeinstr=-1)
 
 	traindl,valdl,testdl = mn.splitData(newdatalist)
-
-	td, _ = mn.sampleData(valdl)
-
-	y=np.concatenate(td['y'],axis=1)[notelist] #keep only note labels
-	print (np.ndarray.tolist(np.sum(y,axis=1)))
-
-	#visualizing spectrogram
-	# X=np.concatenate(td['X'][0:1],axis=1)[:,0:2]
-	# print (X.shape)
-	# Xnorm=normalize(X)
-	# H=filterbank(Xnorm,'stft')
-	# print (H.shape)
 
 	stftmod = fbmodel(fb='stft')
 
@@ -139,4 +191,6 @@ def main():
 	plt.show()
 
 if __name__ == '__main__':
+	#experiment1()
+	#results1()
 	main()
