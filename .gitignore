@@ -1,0 +1,6 @@
+*.zip
+*.docx
+*.DS_Store
+*.npz
+*.ipynb_checkpoints/
+data/musicnet/
